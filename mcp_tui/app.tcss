@@ -1,0 +1,9 @@
+#log-widget {
+    border: solid lightblue;
+    padding: 1 2;
+}
+
+DataTable {
+    border: solid lightblue;
+    padding: 1 2;
+} 

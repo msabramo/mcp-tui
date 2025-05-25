@@ -1,0 +1,24 @@
+[project]
+name = "mcp-tui"
+version = "0.1.0"
+description = "A TUI app to list MCP servers from a mcp.json file."
+authors = [
+    { name = "Your Name", email = "your.email@example.com" }
+]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "typer",
+    "textual",
+    "pydantic",
+    "mcp",
+    "httpx",
+]
+
+[project.optional-dependencies]
+dev = [
+    "textual-dev",
+]
+
+[tool.uv]
+# No special configuration needed for uv, but this section can be used for future options.

@@ -14,8 +14,9 @@ from pydantic import BaseModel
 import typer
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Log
+from textual.screen import Screen, ModalScreen
+from textual.widgets import DataTable, Footer, Log, Input, Button, Label, Static
+from textual.containers import Container, Horizontal
 
 
 app_cli = typer.Typer()
@@ -77,6 +78,115 @@ class LogViewScreen(Screen):
         if event.key == "escape":
             self.app.pop_screen()
 
+class ToolInvokeModal(ModalScreen):
+    DEFAULT_CSS = """
+    ToolInvokeModal {
+        align: center middle;
+    }
+    ToolInvokeModal > Container {
+        width: auto;
+        height: auto;
+        border: thick $background 80%;
+        background: $surface;
+        padding: 2 4;
+    }
+    ToolInvokeModal > Container > Label {
+        width: 100%;
+        content-align-horizontal: center;
+        margin-top: 1;
+    }
+    ToolInvokeModal > Container > Horizontal {
+        width: auto;
+        height: auto;
+    }
+    ToolInvokeModal > Container > Horizontal > Button {
+        margin: 2 4;
+    }
+    """
+    def __init__(self, tool, server, invoke_callback=None):
+        super().__init__()
+        self.tool = tool
+        self.server = server
+        self.invoke_callback = invoke_callback
+        self.inputs = {}
+        self.result = None
+
+    def compose(self) -> ComposeResult:
+        with Container():
+            yield Label(f"Invoke tool: {getattr(self.tool, 'name', str(self.tool))}")
+            schema = getattr(self.tool, "input_schema", None)
+            print(f"[DEBUG] Tool input_schema: {schema}")  # Debug print
+            if schema and isinstance(schema, dict):
+                for field, field_info in schema.items():
+                    placeholder = f"{field}: " + field_info.get("description", "")
+                    input_widget = Input(id=f"input_{field}", placeholder=placeholder)
+                    self.inputs[field] = input_widget
+                    yield input_widget
+            else:
+                # No schema: let user specify key and value
+                key_input = Input(id="input_key", placeholder="argument name (e.g. prompt)", value="prompt")
+                value_input = Input(id="input_value", placeholder="argument value")
+                self.inputs["key"] = key_input
+                self.inputs["value"] = value_input
+                yield key_input
+                yield value_input
+            with Horizontal():
+                yield Button("Invoke", id="invoke", variant="success")
+                yield Button("Cancel", id="cancel", variant="error")
+            self.links_widget = Static("", id="tool-links-widget", classes="tool-links-pane")
+            yield self.links_widget
+            self.result = Log(id="tool-result-log", classes="tool-result-log-pane")
+            yield self.result
+
+    def on_button_pressed(self, event):
+        if event.button.id == "cancel":
+            self.dismiss(None)
+        elif event.button.id == "invoke":
+            schema = getattr(self.tool, "input_schema", None)
+            if schema and isinstance(schema, dict):
+                values = {field: self.inputs[field].value for field in schema.keys()}
+            else:
+                # No schema: use user-supplied key and value
+                key = self.inputs["key"].value.strip() or "prompt"
+                value = self.inputs["value"].value
+                values = {key: value}
+            if self.invoke_callback:
+                self.result.clear()
+                self.result.write("[yellow]Invoking...[/yellow]")
+                async def do_invoke():
+                    try:
+                        result = await self.invoke_callback(self.tool, self.server, values)
+                        self.display_result(result)
+                    except Exception as e:
+                        self.result.write(f"[red]Error: {e}[/red]")
+                import asyncio
+                asyncio.create_task(do_invoke())
+
+    def display_result(self, result):
+        import json
+        import re
+        self.result.clear()
+        self.links_widget.update("")
+        urls = set()
+        try:
+            data = result
+            if isinstance(result, str):
+                data = json.loads(result)
+            pretty = json.dumps(data, indent=2, ensure_ascii=False)
+            urls.update(re.findall(r'https?://\S+', pretty))
+        except Exception:
+            pretty = str(result)
+            urls.update(re.findall(r'https?://\S+', pretty))
+        # Output URLs in the links widget if any
+        if urls:
+            def clean_url(url):
+                return url.rstrip('.,;\'\"')
+            links_markup = "[b]Links[/b]\n" + "\n".join(f"[link={clean_url(url)}]{clean_url(url)}[/link]" for url in urls)
+            self.links_widget.update(links_markup)
+        else:
+            self.links_widget.update("")
+        self.result.write(pretty)
+
 class ToolsListScreen(Screen):
     CSS_PATH = "app.tcss"
     BINDINGS = [
@@ -86,20 +196,25 @@ class ToolsListScreen(Screen):
         Binding("k", "k", "Up"),
     ]
 
-    def __init__(self, server_name: str, tools: list, **kwargs):
+    def __init__(self, server_name: str, tools: list, server=None, invoke_callback=None, **kwargs):
         super().__init__(**kwargs)
         self.server_name = server_name
         self.tools = tools if tools is not None else []
         self.table = None
+        self.server = server
+        self.invoke_callback = invoke_callback
 
     def compose(self) -> ComposeResult:
         self.table = DataTable(id="tools-table", classes="tools-table-pane")
         self.table.border_title = f"Tools for {self.server_name}"
         self.table.add_column("Name")
         self.table.add_column("Description")
+        self.table.cursor_type = "row"
         if self.tools:
             for tool in self.tools:
-                self.table.add_row(tool.name, tool.description)
+                name = getattr(tool, "name", str(tool))
+                desc = getattr(tool, "description", "")
+                self.table.add_row(name, desc)
         else:
             self.table.add_row("(No tools found or not yet loaded)")
         yield self.table
@@ -117,6 +232,22 @@ class ToolsListScreen(Screen):
         if self.table:
             self.table.action_cursor_up()
 
+    def on_data_table_row_selected(self, event):
+        if not self.table or not self.tools:
+            return
+        row = self.table.cursor_row
+        if row is None or row >= len(self.tools):
+            return
+        tool = self.tools[row]
+        # Show modal dialog for tool invocation
+        self.app.push_screen(ToolInvokeModal(tool, self.server, self.invoke_callback))
+
+    async def invoke_tool_callback(self, tool, server, values):
+        # This should invoke the tool on the server and return the result
+        # Placeholder: just echo the input values
+        # TODO: Implement actual tool invocation via MCP
+        return f"Invoked {getattr(tool, 'name', str(tool))} with {values}"
+
 class ServerListScreen(Screen):
     CSS_PATH = "app.tcss"
     BINDINGS = [
@@ -133,7 +264,8 @@ class ServerListScreen(Screen):
         self._row_keys = []
         self.status_col_key = None
         self.server_logs = server_logs
-        self.server_tools = {}  # idx -> list of tool names
+        self.server_tools = {}  # idx -> list of tool objects
+        self.server_sessions = {}  # idx -> (AsyncExitStack, ClientSession)
 
     def compose(self) -> ComposeResult:
         self.table = DataTable(id="servers-table", classes="servers-table-pane")
@@ -168,6 +300,7 @@ class ServerListScreen(Screen):
 
     async def check_server(self, idx, server: MCPServer):
         tools = []
+        session = None
         if not server.command and server.url:
             stderr_file = tempfile.TemporaryFile(mode="w+")
             self.server_logs[idx] = (None, stderr_file)
@@ -209,22 +342,22 @@ class ServerListScreen(Screen):
                     args=args,
                     env=env
                 )
-                async with AsyncExitStack() as stack:
-                    stdio, write = await stack.enter_async_context(
-                        stdio_client(server_params, errlog=stderr_file)
-                    )
-                    session = await stack.enter_async_context(ClientSession(stdio, write))
-                    await session.initialize()
-                    tool_list = await session.list_tools()
-                    print(f"Tool list: {tool_list}")
-                    if isinstance(tool_list, dict) and "tools" in tool_list:
-                        tools = [t["name"] if isinstance(t, dict) and "name" in t else str(t) for t in tool_list["tools"]]
-                    elif isinstance(tool_list, list):
-                        tools = [t["name"] if isinstance(t, dict) and "name" in t else str(t) for t in tool_list]
+                stack = AsyncExitStack()
+                await stack.__aenter__()
+                stdio, write = await stack.enter_async_context(
+                    stdio_client(server_params, errlog=stderr_file)
+                )
+                session = await stack.enter_async_context(ClientSession(stdio, write))
+                await session.initialize()
+                tool_list = await session.list_tools()
+                # Store the full tool objects for invocation
+                if hasattr(tool_list, "tools"):
                     tools = tool_list.tools
-                    print(f"Adding tools: {tools}")
-                    self.server_tools[idx] = tools
-                    self.update_status(idx, "[green]✔[/green]")
+                else:
+                    tools = tool_list
+                self.server_tools[idx] = tools
+                self.server_sessions[idx] = (stack, session)
+                self.update_status(idx, "[green]✔[/green]")
             except Exception as e:
                 self.update_status(idx, "[red]✗[/red]")
                 import traceback
@@ -264,7 +397,6 @@ class ServerListScreen(Screen):
         self.app.exit()
 
     def on_data_table_row_selected(self, event):
-        # event.row_key gives the selected row's key
         if not self.table or not self._row_keys:
             return
         try:
@@ -275,8 +407,42 @@ class ServerListScreen(Screen):
             return
         server = self.servers[idx]
         tools = self.server_tools.get(idx, [])
-        print(f"Tools: {tools}")
-        self.app.push_screen(ToolsListScreen(server.name, tools))
+        session_tuple = self.server_sessions.get(idx)
+        session = session_tuple[1] if session_tuple else None
+        self.app.push_screen(ToolsListScreen(server.name, tools, server, invoke_callback=self.make_invoke_callback(session)))
+
+    def make_invoke_callback(self, session):
+        async def invoke_tool(tool, server, values):
+            if not session:
+                return "No session available for this server."
+            tool_name = getattr(tool, "name", str(tool))
+            # Always pass a dict if the tool has an input schema
+            schema = getattr(tool, "input_schema", None)
+            if schema and isinstance(schema, dict):
+                arguments = values if isinstance(values, dict) else {}
+            else:
+                # If no schema, pass as a single value or as dict with a generic key
+                arguments = values if isinstance(values, dict) else {"value": values}
+            try:
+                result = await session.call_tool(tool_name, arguments)
+                # Try to extract a string result
+                if hasattr(result, "content"):
+                    # result.content may be a list of content objects
+                    if isinstance(result.content, list):
+                        # Try to join text fields
+                        texts = []
+                        for c in result.content:
+                            if hasattr(c, "text"):
+                                texts.append(str(c.text))
+                            else:
+                                texts.append(str(c))
+                        return "\n".join(texts)
+                    return str(result.content)
+                return str(result)
+            except Exception as e:
+                import traceback
+                return f"Error invoking tool: {e}\n{traceback.format_exc()}"
+        return invoke_tool
 
 class MCPServerListApp(App):
     CSS_PATH = "app.tcss"

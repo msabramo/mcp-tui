@@ -22,3 +22,6 @@ dev = [
 
 [tool.uv]
 # No special configuration needed for uv, but this section can be used for future options.
+
+[project.scripts]
+mcp-tui = "mcp_tui.app:app_cli"

@@ -25,3 +25,6 @@ dev = [
 
 [project.scripts]
 mcp-tui = "mcp_tui.app:app_cli"
+
+[tool.setuptools.package-data]
+"mcp_tui" = ["app.tcss"]

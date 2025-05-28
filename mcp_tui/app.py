@@ -17,6 +17,7 @@ from textual.binding import Binding
 from textual.screen import Screen, ModalScreen
 from textual.widgets import DataTable, Footer, Log, Input, Button, Label, Static
 from textual.containers import Container, Horizontal
+import importlib.resources
 
 
 app_cli = typer.Typer()
@@ -32,7 +33,7 @@ class MCPServer(BaseModel):
     # Add other fields as needed
 
 class LogViewScreen(Screen):
-    CSS_PATH = "app.tcss"
+    CSS_PATH = importlib.resources.files("mcp_tui").joinpath("app.tcss")
     BINDINGS = [
         Binding("escape", "pop_screen", "Back"),
     ]
@@ -79,30 +80,7 @@ class LogViewScreen(Screen):
             self.app.pop_screen()
 
 class ToolInvokeModal(ModalScreen):
-    DEFAULT_CSS = """
-    ToolInvokeModal {
-        align: center middle;
-    }
-    ToolInvokeModal > Container {
-        width: auto;
-        height: auto;
-        border: thick $background 80%;
-        background: $surface;
-        padding: 2 4;
-    }
-    ToolInvokeModal > Container > Label {
-        width: 100%;
-        content-align-horizontal: center;
-        margin-top: 1;
-    }
-    ToolInvokeModal > Container > Horizontal {
-        width: auto;
-        height: auto;
-    }
-    ToolInvokeModal > Container > Horizontal > Button {
-        margin: 2 4;
-    }
-    """
+    CSS_PATH = importlib.resources.files("mcp_tui").joinpath("app.tcss")
     def __init__(self, tool, server, invoke_callback=None):
         super().__init__()
         self.tool = tool
@@ -188,7 +166,7 @@ class ToolInvokeModal(ModalScreen):
         self.result.write(pretty)
 
 class ToolsListScreen(Screen):
-    CSS_PATH = "app.tcss"
+    CSS_PATH = importlib.resources.files("mcp_tui").joinpath("app.tcss")
     BINDINGS = [
         Binding("q", "pop_screen", "Back"),
         Binding("escape", "pop_screen", "Back"),
@@ -249,7 +227,7 @@ class ToolsListScreen(Screen):
         return f"Invoked {getattr(tool, 'name', str(tool))} with {values}"
 
 class ServerListScreen(Screen):
-    CSS_PATH = "app.tcss"
+    CSS_PATH = importlib.resources.files("mcp_tui").joinpath("app.tcss")
     BINDINGS = [
         Binding("l", "show_logs", "Show Logs"),
         Binding("j", "j", "Down"),
@@ -445,7 +423,7 @@ class ServerListScreen(Screen):
         return invoke_tool
 
 class MCPServerListApp(App):
-    CSS_PATH = "app.tcss"
+    CSS_PATH = importlib.resources.files("mcp_tui").joinpath("app.tcss")
 
     def __init__(self, servers: List[MCPServer], **kwargs):
         super().__init__(**kwargs)

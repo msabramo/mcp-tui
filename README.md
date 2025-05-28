@@ -4,10 +4,19 @@ A Python TUI app using [uv](https://github.com/astral-sh/uv), [Typer](https://ty
 
 ## Installation
 
+Clone the repository:
+
+```sh
+git clone git@github.com:msabramo/mcp-tui.git
+cd mcp-tui
+```
+
+Install [uv](https://github.com/astral-sh/uv) if you don't have it already.
+
 Install dependencies using [uv](https://github.com/astral-sh/uv):
 
 ```sh
-uv pip install -r requirements.txt
+uv sync
 ```
 
 ## Usage
@@ -15,13 +24,5 @@ uv pip install -r requirements.txt
 Run the app with:
 
 ```sh
-python -m mcp_tui.app mcp.json
+uv run python mcp_tui/app.py ~/.cursor/mcp.json
 ```
-
-Or, if you want to use the CLI directly:
-
-```sh
-python mcp_tui/app.py mcp.json
-```
-
-See `mcp.json.example` for the expected format.

@@ -10,13 +10,13 @@ A Python TUI app using [uv](https://github.com/astral-sh/uv), [Typer](https://ty
 
 ![MCP server list](docs/images/screenshot_001.png)
 
-### List tools for an MCP server
-
-![List tools for an MCP server](docs/images/screenshot_002.png)
-
 ### Show logs for an MCP server
 
 ![Show logs for an MCP server](docs/images/screenshot_003.png)
+
+### List tools for an MCP server
+
+![List tools for an MCP server](docs/images/screenshot_002.png)
 
 ### Invoke a tool
 

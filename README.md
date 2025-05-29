@@ -4,13 +4,13 @@ A Python TUI app using [uv](https://github.com/astral-sh/uv), [Typer](https://ty
 
 ## Screenshots
 
-### Server List
+### MCP server list
 
-![Server List](docs/images/screenshot_001.png)
+![MCP server list](docs/images/screenshot_001.png)
 
-### Tool Invocation Result
+### List tools for an MCP server
 
-![Tool Invocation Result](docs/images/screenshot_002.png)
+![List tools for an MCP server](docs/images/screenshot_002.png)
 
 ## Installation (easy) without development
 

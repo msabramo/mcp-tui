@@ -113,6 +113,12 @@ class LogViewScreen(Screen):
             self.filter_input.remove()
             self.filter_input = None
 
+    def on_key(self, event):
+        if self.filter_input and self.filter_input.has_focus:
+            return  # Let filter input handle Esc
+        if event.key == "escape":
+            self.app.pop_screen()
+
 class ToolInvokeModal(ModalScreen):
     CSS_PATH = importlib.resources.files("mcp_tui").joinpath("app.tcss")
     def __init__(self, tool, server, invoke_callback=None):
@@ -291,7 +297,9 @@ class ToolsListScreen(Screen):
             self.filter_input = None
 
     def on_key(self, event):
-        if event.key in ("escape", "q"):
+        if self.filter_input and self.filter_input.has_focus:
+            return  # Let filter input handle Esc
+        if event.key == "escape":
             self.app.pop_screen()
 
     def action_j(self):

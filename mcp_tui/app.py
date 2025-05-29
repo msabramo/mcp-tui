@@ -17,6 +17,7 @@ from textual.binding import Binding
 from textual.screen import Screen, ModalScreen
 from textual.widgets import DataTable, Footer, Log, Input, Button, Label, Static
 from textual.containers import Container, Horizontal
+from textual.events import Key
 import importlib.resources
 
 
@@ -36,6 +37,7 @@ class LogViewScreen(Screen):
     CSS_PATH = importlib.resources.files("mcp_tui").joinpath("app.tcss")
     BINDINGS = [
         Binding("escape", "pop_screen", "Back"),
+        Binding("/", "filter", "Filter"),
     ]
 
     def __init__(self, server_name: str, stdout_file, stderr_file):
@@ -45,6 +47,10 @@ class LogViewScreen(Screen):
         self.stderr_file = stderr_file
         self.stdout_lines = []
         self.stderr_lines = []
+        self.filtered_lines = []
+        self.current_regex = ""
+        self.log_widget = None
+        self.filter_input = None
         if self.stdout_file:
             try:
                 self.stdout_file.seek(0)
@@ -57,7 +63,6 @@ class LogViewScreen(Screen):
                 self.stderr_lines = self.stderr_file.read().splitlines()
             except Exception:
                 pass
-        self.log_widget = None
 
     def compose(self) -> ComposeResult:
         self.log_widget = Log(classes="log-pane", id="log-widget")
@@ -65,19 +70,48 @@ class LogViewScreen(Screen):
         yield Footer()
 
     async def on_mount(self) -> None:
-        # Set dynamic border title if supported
+        self._refresh_log()
         if hasattr(self.log_widget, "border_title"):
             self.log_widget.border_title = f"Logs for {self.server_name}"
-        def write_logs():
-            if self.stderr_lines:
-                self.log_widget.write_lines(self.stderr_lines)
-            if self.stdout_lines:
-                self.log_widget.write_lines(["--- STDOUT ---"] + self.stdout_lines)
-        self.call_after_refresh(write_logs)
 
-    def on_key(self, event):
-        if event.key == "escape":
-            self.app.pop_screen()
+    def _refresh_log(self):
+        self.log_widget.clear()
+        all_lines = self.stderr_lines + (["--- STDOUT ---"] + self.stdout_lines if self.stdout_lines else [])
+        if self.current_regex:
+            import re
+            try:
+                regex = re.compile(self.current_regex, re.IGNORECASE)
+                lines = [line for line in all_lines if regex.search(line)]
+            except Exception:
+                lines = all_lines
+        else:
+            lines = all_lines
+        self.filtered_lines = lines
+        if lines:
+            self.log_widget.write_lines(lines)
+        else:
+            self.log_widget.write_lines(["(No log lines match filter)"])
+
+    def action_filter(self):
+        if self.filter_input:
+            return
+        self.filter_input = Input(placeholder="Regex filter (Enter=apply, Esc=cancel)", value=self.current_regex, id="filter-input")
+        self.mount(self.filter_input)
+        self.filter_input.focus()
+        self.filter_input.border_title = "Filter"
+
+    def on_input_submitted(self, event: Input.Submitted):
+        if self.filter_input and event.input is self.filter_input:
+            value = self.filter_input.value
+            self.current_regex = value or ""
+            self._refresh_log()
+            self.filter_input.remove()
+            self.filter_input = None
+
+    def on_input_key(self, event: Key):
+        if self.filter_input and event.sender is self.filter_input and event.key == "escape":
+            self.filter_input.remove()
+            self.filter_input = None
 
 class ToolInvokeModal(ModalScreen):
     CSS_PATH = importlib.resources.files("mcp_tui").joinpath("app.tcss")
@@ -192,15 +226,19 @@ class ToolsListScreen(Screen):
         Binding("escape", "pop_screen", "Back"),
         Binding("j", "j", "Down"),
         Binding("k", "k", "Up"),
+        Binding("/", "filter", "Filter"),
     ]
 
     def __init__(self, server_name: str, tools: list, server=None, invoke_callback=None, **kwargs):
         super().__init__(**kwargs)
         self.server_name = server_name
         self.tools = tools if tools is not None else []
+        self.filtered_tools = self.tools
         self.table = None
         self.server = server
         self.invoke_callback = invoke_callback
+        self.current_regex = ""
+        self.filter_input = None
 
     def compose(self) -> ComposeResult:
         self.table = DataTable(id="tools-table", classes="tools-table-pane")
@@ -208,15 +246,49 @@ class ToolsListScreen(Screen):
         self.table.add_column("Name")
         self.table.add_column("Description")
         self.table.cursor_type = "row"
-        if self.tools:
-            for tool in self.tools:
+        self._refresh_table()
+        yield self.table
+        yield Footer()
+
+    def _refresh_table(self):
+        self.table.clear()
+        if self.filtered_tools:
+            for tool in self.filtered_tools:
                 name = getattr(tool, "name", str(tool))
                 desc = getattr(tool, "description", "")
                 self.table.add_row(name, desc)
         else:
             self.table.add_row("(No tools found or not yet loaded)")
-        yield self.table
-        yield Footer()
+
+    def action_filter(self):
+        if self.filter_input:
+            return
+        self.filter_input = Input(placeholder="Regex filter (Enter=apply, Esc=cancel)", value=self.current_regex, id="filter-input")
+        self.mount(self.filter_input)
+        self.filter_input.focus()
+        self.filter_input.border_title = "Filter"
+
+    def on_input_submitted(self, event: Input.Submitted):
+        if self.filter_input and event.input is self.filter_input:
+            import re
+            value = self.filter_input.value
+            self.current_regex = value or ""
+            if not self.current_regex:
+                self.filtered_tools = self.tools
+            else:
+                try:
+                    regex = re.compile(self.current_regex, re.IGNORECASE)
+                    self.filtered_tools = [t for t in self.tools if regex.search(getattr(t, "name", "") + " " + getattr(t, "description", ""))]
+                except Exception:
+                    self.filtered_tools = self.tools
+            self._refresh_table()
+            self.filter_input.remove()
+            self.filter_input = None
+
+    def on_input_key(self, event: Key):
+        if self.filter_input and event.sender is self.filter_input and event.key == "escape":
+            self.filter_input.remove()
+            self.filter_input = None
 
     def on_key(self, event):
         if event.key in ("escape", "q"):
@@ -253,17 +325,21 @@ class ServerListScreen(Screen):
         Binding("j", "j", "Down"),
         Binding("k", "k", "Up"),
         Binding("q", "quit", "Quit"),
+        Binding("/", "filter", "Filter"),
     ]
 
     def __init__(self, servers: List[MCPServer], server_logs, **kwargs):
         super().__init__(**kwargs)
         self.servers = servers
+        self.filtered_servers = self.servers
         self.table = None
         self._row_keys = []
         self.status_col_key = None
         self.server_logs = server_logs
         self.server_tools = {}  # idx -> list of tool objects
         self.server_sessions = {}  # idx -> (AsyncExitStack, ClientSession)
+        self.current_regex = ""
+        self.filter_input = None
 
     def compose(self) -> ComposeResult:
         self.table = DataTable(id="servers-table", classes="servers-table-pane")
@@ -272,20 +348,7 @@ class ServerListScreen(Screen):
         self.status_col_key = self.table.add_column("Status", width=8)
         self.table.add_column("Type", width=10)
         self.table.cursor_type = "row"
-        self._row_keys = []
-        for server in self.servers:
-            name = server.name
-            status = ""
-            if server.type:
-                type_ = server.type
-            elif server.command:
-                type_ = "stdio"
-            elif server.url:
-                type_ = "http"
-            else:
-                type_ = ""
-            row_key = self.table.add_row(name, status, type_)
-            self._row_keys.append(row_key)
+        self._refresh_table()
         yield self.table
         yield Footer()
 
@@ -393,6 +456,53 @@ class ServerListScreen(Screen):
 
     def action_quit(self):
         self.app.exit()
+
+    def action_filter(self):
+        if self.filter_input:
+            return
+        self.filter_input = Input(placeholder="Regex filter (Enter=apply, Esc=cancel)", value=self.current_regex, id="filter-input")
+        self.mount(self.filter_input)
+        self.filter_input.focus()
+        self.filter_input.border_title = "Filter"
+
+    def on_input_submitted(self, event: Input.Submitted):
+        if self.filter_input and event.input is self.filter_input:
+            import re
+            value = self.filter_input.value
+            self.current_regex = value or ""
+            if not self.current_regex:
+                self.filtered_servers = self.servers
+            else:
+                try:
+                    regex = re.compile(self.current_regex, re.IGNORECASE)
+                    self.filtered_servers = [s for s in self.servers if regex.search(s.name + " " + (s.type or "") + " " + (s.command or "") + " " + (s.url or ""))]
+                except Exception:
+                    self.filtered_servers = self.servers
+            self._refresh_table()
+            self.filter_input.remove()
+            self.filter_input = None
+
+    def on_input_key(self, event: Key):
+        if self.filter_input and event.sender is self.filter_input and event.key == "escape":
+            self.filter_input.remove()
+            self.filter_input = None
+
+    def _refresh_table(self):
+        self.table.clear()
+        self._row_keys = []
+        for server in self.filtered_servers:
+            name = server.name
+            status = ""
+            if server.type:
+                type_ = server.type
+            elif server.command:
+                type_ = "stdio"
+            elif server.url:
+                type_ = "http"
+            else:
+                type_ = ""
+            row_key = self.table.add_row(name, status, type_)
+            self._row_keys.append(row_key)
 
     def on_data_table_row_selected(self, event):
         if not self.table or not self._row_keys:

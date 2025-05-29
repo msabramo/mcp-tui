@@ -92,14 +92,20 @@ class ToolInvokeModal(ModalScreen):
     def compose(self) -> ComposeResult:
         with Container():
             yield Label(f"Invoke tool: {getattr(self.tool, 'name', str(self.tool))}")
-            schema = getattr(self.tool, "input_schema", None)
-            print(f"[DEBUG] Tool input_schema: {schema}")  # Debug print
-            if schema and isinstance(schema, dict):
-                for field, field_info in schema.items():
-                    placeholder = f"{field}: " + field_info.get("description", "")
-                    input_widget = Input(id=f"input_{field}", placeholder=placeholder)
+            schema = getattr(self.tool, "inputSchema", None)
+            if schema and isinstance(schema, dict) and "properties" in schema:
+                for field, field_info in schema["properties"].items():
+                    field_type = field_info.get("type")
+                    if field_type == "string":
+                        input_widget = Input(id=f"input_{field}", name=field, placeholder=field)
+                    elif field_type == "array" and field_info.get("items", {}).get("type") == "string":
+                        input_widget = Input(id=f"input_{field}", name=field, placeholder=f"{field} (comma or newline separated)", multiline=True)
+                    else:
+                        input_widget = Input(id=f"input_{field}", name=field, placeholder=f"{field} (unsupported type: {field_type})")
                     self.inputs[field] = input_widget
                     yield input_widget
+                    if field == "prompt":
+                        break
             else:
                 # No schema: let user specify key and value
                 key_input = Input(id="input_key", placeholder="argument name (e.g. prompt)", value="prompt")
@@ -113,18 +119,32 @@ class ToolInvokeModal(ModalScreen):
                 yield Button("Cancel", id="cancel", variant="error")
             self.links_widget = Static("", id="tool-links-widget", classes="tool-links-pane")
             yield self.links_widget
-            self.result = Log(id="tool-result-log", classes="tool-result-log-pane")
+            self.result = Log(
+                id="tool-result-log",
+                classes="tool-result-log-pane",
+                highlight=True,
+            )
             yield self.result
 
     def on_button_pressed(self, event):
         if event.button.id == "cancel":
             self.dismiss(None)
         elif event.button.id == "invoke":
-            schema = getattr(self.tool, "input_schema", None)
-            if schema and isinstance(schema, dict):
-                values = {field: self.inputs[field].value for field in schema.keys()}
+            schema = getattr(self.tool, "inputSchema", None)
+            if schema and isinstance(schema, dict) and "properties" in schema:
+                values = {}
+                for field in schema["properties"]:
+                    widget = self.inputs[field]
+                    val = widget.value
+                    field_type = schema["properties"][field].get("type")
+                    if field_type == "array":
+                        # Split by newlines or commas for arrays
+                        values[field] = [v.strip() for v in val.replace(',', '\n').splitlines() if v.strip()]
+                    else:
+                        values[field] = val
+                    if field == "prompt":
+                        break
             else:
-                # No schema: use user-supplied key and value
                 key = self.inputs["key"].value.strip() or "prompt"
                 value = self.inputs["value"].value
                 values = {key: value}
@@ -156,7 +176,7 @@ class ToolInvokeModal(ModalScreen):
             pretty = str(result)
             urls.update(re.findall(r'https?://\S+', pretty))
         # Output URLs in the links widget if any
-        if urls:
+        if False and urls:
             def clean_url(url):
                 return url.rstrip('.,;\'\"')
             links_markup = "[b]Links[/b]\n" + "\n".join(f"[link={clean_url(url)}]{clean_url(url)}[/link]" for url in urls)
@@ -434,8 +454,42 @@ class MCPServerListApp(App):
         self.push_screen(ServerListScreen(self.servers, self.server_logs))
 
 @app_cli.command()
-def main(mcp_json: Path):
-    """Open a TUI listing MCP servers from a mcp.json file."""
+def main(
+    mcp_json: Path = typer.Argument(None, help="Path to mcp.json file", show_default=False),
+    server_cmd: Optional[str] = typer.Option(None, "--server-cmd", help="Command to run as a stdio MCP server"),
+    server_args: Optional[List[str]] = typer.Option(None, "--server-args", help="Arguments for the stdio MCP server command"),
+    server_name: Optional[str] = typer.Option("Custom MCP Server", "--server-name", help="Name for the MCP server when using --server-cmd"),
+) -> None:
+    """Open a TUI listing MCP servers from a mcp.json file, or connect to a single stdio MCP server if --server-cmd is given."""
+    if server_cmd:
+        # User specified a command, connect to it as a stdio MCP server
+        server = MCPServer(
+            name=server_name or "Custom MCP Server",
+            command=server_cmd,
+            args=server_args or [],
+            type="stdio"
+        )
+        # Show tools for this server directly (skip server list if only one server)
+        class SingleServerApp(App):
+            CSS_PATH = importlib.resources.files("mcp_tui").joinpath("app.tcss")
+            def __init__(self, server: MCPServer, **kwargs):
+                super().__init__(**kwargs)
+                self.server = server
+                self.server_logs = {0: (None, None)}
+            async def on_mount(self):
+                # Reuse ServerListScreen logic to connect and get tools
+                screen = ServerListScreen([self.server], self.server_logs)
+                await screen.check_server(0, self.server)
+                tools = screen.server_tools.get(0, [])
+                session_tuple = screen.server_sessions.get(0)
+                session = session_tuple[1] if session_tuple else None
+                self.push_screen(ToolsListScreen(self.server.name, tools, self.server, invoke_callback=screen.make_invoke_callback(session)))
+        SingleServerApp(server).run()
+        return
+    # Default: load from mcp.json
+    if not mcp_json:
+        typer.echo("Error: You must specify either a path to mcp.json or --server-cmd.")
+        raise typer.Exit(1)
     with mcp_json.open() as f:
         data = json.load(f)
     # Adjusted for ~/.cursor/mcp.json structure

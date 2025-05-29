@@ -14,6 +14,14 @@ A Python TUI app using [uv](https://github.com/astral-sh/uv), [Typer](https://ty
 
 ![List tools for an MCP server](docs/images/screenshot_002.png)
 
+### Show logs for an MCP server
+
+![Show logs for an MCP server](docs/images/screenshot_003.png)
+
+### Invoke a tool
+
+![Invoke a tool](docs/images/screenshot_004.png)
+
 ## Installation (easy) without development
 
 This is if you just want to use the app and not contribute to the development,

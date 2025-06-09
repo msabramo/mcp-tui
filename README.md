@@ -3,7 +3,7 @@
 
 **If you like this project, please consider starring the repo on GitHub!** ⭐️
 
-> **Pull requests are very welcome!** If you have ideas, bug fixes, or improvements, please open a PR.
+**Pull requests are very welcome!** If you have ideas, bug fixes, or improvements, please open a PR.
 
 A Python TUI app using [uv](https://github.com/astral-sh/uv), [Typer](https://typer.tiangolo.com/), and [Textual](https://textual.textualize.io/) to list MCP servers from a `mcp.json` file.
 

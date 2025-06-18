@@ -1,6 +1,8 @@
 
 # MCP TUI
 
+## An MCP Host application that runs in your terminal; written in Python
+
 **If you like this project, please consider starring the repo on GitHub! You can also upvote on [Hacker News](https://news.ycombinator.com/item?id=44218230).** ⭐️
 
 **Pull requests are very welcome!** If you have ideas, bug fixes, or improvements, please open a PR.
